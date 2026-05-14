@@ -149,9 +149,7 @@ The exported .docx is validated against:
 
 ## Author
 
-**BAOQI YU** — Graduate School of Youngsan University, Major of Computer Science and Technology
-
-Supervised by Jinwhan Kim
+**
 
 ## License
 
