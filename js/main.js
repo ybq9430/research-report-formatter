@@ -3,7 +3,7 @@
 
 import { REPORT_SPEC as S } from '../templates/report_spec.js';
 import { getState, setState, updateState, subscribe, loadApiConfig, saveApiConfig, initialState } from './state.js';
-import { callDeepSeek, testConnection, polishParagraph, expandSection, checkFormatting, matchReferencesToBody, integrateFullReport, parseReference } from './api.js';
+import { callDeepSeek, testConnection, polishParagraph, expandSection, checkFormatting, matchReferencesToBody, integrateFullReport, parseReference, parseDocxContent } from './api.js';
 import { fetchByDOI, batchFetchDOI, parseBibTeX } from './crossref.js';
 import { getFigureLabel, getTableLabel, getEquationLabel, assignReferenceNumbers, formatReference, buildTOC, applyReferenceMarkers, generateMarkdown } from './formatter.js';
 import { exportDocx, exportMarkdownBlob } from './exporter.js';
@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAbstractsTab();
   initAppendixTab();
   initAIToolsTab();
+  initImportDocx();
   initExportTab();
   initTopBar();
   initPreview();
@@ -1016,6 +1017,221 @@ function initAIToolsTab() {
       toast('Full report integrated. Check preview.');
     } catch (e) { toast(`Error: ${e.message}`, 'error'); }
     btn.disabled = false; btn.textContent = 'Integrate & Preview';
+  });
+}
+
+// ═══════════════════════════════════════════
+// DOCX IMPORT (Upload .docx + AI formatting)
+// ═══════════════════════════════════════════
+function initImportDocx() {
+  $('#btn-import-docx')?.addEventListener('click', async () => {
+    const cfg = getApiConfig();
+    if (!cfg.key) { toast('Please configure API Key first.', 'error'); return; }
+
+    const fileInput = $('#import-docx-file');
+    const file = fileInput?.files?.[0];
+    if (!file) { toast('Please select a .docx file first.', 'error'); return; }
+
+    const strategy = val('import-strategy') || 'full';
+    const btn = $('#btn-import-docx');
+    const statusEl = $('#import-status');
+    const previewEl = $('#import-preview');
+
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+    if (statusEl) { statusEl.style.display = 'inline'; statusEl.textContent = 'Reading .docx...'; statusEl.style.color = 'var(--accent)'; }
+
+    try {
+      // Step 1: Read .docx file with mammoth.js
+      let extractedText = '';
+      if (typeof mammoth !== 'undefined') {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        extractedText = result.value || '';
+        if (result.messages && result.messages.length > 0) {
+          console.warn('Mammoth warnings:', result.messages);
+        }
+      } else {
+        // Fallback: try to extract text from docx XML directly using JSZip-like approach
+        // For now, show an error if mammoth didn't load
+        throw new Error('mammoth.js library not loaded. Please check your internet connection and reload the page.');
+      }
+
+      if (!extractedText.trim()) {
+        throw new Error('No text could be extracted from the document. The file may be empty or in an unsupported format.');
+      }
+
+      // Show extracted text length
+      if (statusEl) { statusEl.textContent = `Extracted ${extractedText.length.toLocaleString()} chars. Sending to AI...`; }
+
+      // Show a preview of extracted text
+      if (previewEl) {
+        previewEl.style.display = 'block';
+        previewEl.innerHTML = `<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Extracted text preview:</div><div style="max-height:200px;overflow-y:auto;white-space:pre-wrap;">${escHtml(extractedText.substring(0, 3000))}${extractedText.length > 3000 ? '...' : ''}</div>`;
+      }
+
+      // Step 2: Send to DeepSeek for structuring
+      const parsed = await parseDocxContent(extractedText, strategy, cfg.key, cfg.baseUrl, cfg.model);
+
+      if (!parsed) {
+        throw new Error('AI failed to parse the document structure. The document may be too complex or the API returned an unexpected response.');
+      }
+
+      // Step 3: Merge parsed content into state
+      const currentState = getState();
+      const chapterNumerals = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ', 'Ⅵ', 'Ⅶ'];
+
+      if (strategy === 'full' || strategy === 'chapters') {
+        if (parsed.cover) {
+          const c = parsed.cover;
+          updateState('cover.title', c.title || currentState.cover.title);
+          updateState('cover.subtitle', c.subtitle || currentState.cover.subtitle);
+          updateState('cover.date', c.date || currentState.cover.date);
+          updateState('cover.major', c.major || currentState.cover.major);
+          updateState('cover.school', c.school || currentState.cover.school);
+          updateState('cover.studentName', c.studentName || currentState.cover.studentName);
+          updateState('cover.advisor', c.advisor || currentState.cover.advisor);
+          updateState('cover.advisorSchool', c.advisorSchool || currentState.cover.advisorSchool);
+          updateState('cover.univName', c.univName || currentState.cover.univName);
+        }
+
+        if (parsed.chapters && parsed.chapters.length > 0) {
+          const mergedChapters = [];
+          for (let i = 0; i < Math.max(parsed.chapters.length, 5); i++) {
+            const aiCh = (parsed.chapters[i]) || { title: '', sections: [] };
+            mergedChapters.push({
+              numeral: chapterNumerals[i] || String(i + 1),
+              title: aiCh.title || (currentState.chapters[i] ? currentState.chapters[i].title : ''),
+              sections: (aiCh.sections || []).map((sec, si) => ({
+                heading: String(si + 1),
+                title: sec.title || '',
+                content: sec.content || '',
+                subSections: (sec.subSections || []).map((sub, ssi) => ({
+                  heading: `${si + 1}.${ssi + 1}`,
+                  title: sub.title || '',
+                  content: sub.content || '',
+                })),
+              })),
+            });
+          }
+          setState({ chapters: mergedChapters });
+          renderChapterSelects();
+        }
+
+        if (parsed.references && parsed.references.length > 0) {
+          const mergedRefs = parsed.references.map((ref, i) => ({
+            id: ref.id || `imported_${i}`,
+            authors: ref.authors || '',
+            year: ref.year || '',
+            title: ref.title || '',
+            journal: ref.journal || '',
+            volume: ref.volume || '',
+            issue: ref.issue || '',
+            page: ref.page || '',
+            doi: ref.doi || '',
+            number: null,
+          }));
+          setState({ references: mergedRefs });
+        }
+
+        if (parsed.abstracts) {
+          const abs = parsed.abstracts;
+          if (abs.korean) {
+            updateState('abstracts.korean.title', abs.korean.title || '');
+            updateState('abstracts.korean.studentName', abs.korean.studentName || '');
+            updateState('abstracts.korean.major', abs.korean.major || '');
+            updateState('abstracts.korean.advisor', abs.korean.advisor || '');
+            updateState('abstracts.korean.body', abs.korean.body || '');
+            updateState('abstracts.korean.keywords', abs.korean.keywords || '');
+          }
+          if (abs.english) {
+            updateState('abstracts.english.title', abs.english.title || '');
+            updateState('abstracts.english.studentName', abs.english.studentName || '');
+            updateState('abstracts.english.major', abs.english.major || '');
+            updateState('abstracts.english.advisor', abs.english.advisor || '');
+            updateState('abstracts.english.body', abs.english.body || '');
+            updateState('abstracts.english.keywords', abs.english.keywords || '');
+          }
+        }
+
+        if (parsed.appendix && parsed.appendix.length > 0) {
+          setState({ appendix: parsed.appendix });
+        }
+
+        if (parsed.acknowledgements) {
+          updateState('acknowledgements', parsed.acknowledgements);
+        }
+      }
+
+      if (strategy === 'references' && parsed.references && parsed.references.length > 0) {
+        const mergedRefs = parsed.references.map((ref, i) => ({
+          id: ref.id || `imported_${i}`,
+          authors: ref.authors || '',
+          year: ref.year || '',
+          title: ref.title || '',
+          journal: ref.journal || '',
+          volume: ref.volume || '',
+          issue: ref.issue || '',
+          page: ref.page || '',
+          doi: ref.doi || '',
+          number: null,
+        }));
+        setState({ references: mergedRefs });
+      }
+
+      // Restore cover form inputs
+      const s = getState();
+      setVal('cover-title', s.cover.title);
+      setVal('cover-subtitle', s.cover.subtitle);
+      setVal('cover-date', s.cover.date);
+      setVal('cover-major', s.cover.major);
+      setVal('cover-school', s.cover.school);
+      setVal('cover-student-name', s.cover.studentName);
+      setVal('cover-advisor', s.cover.advisor);
+      setVal('cover-advisor-school', s.cover.advisorSchool);
+      setVal('cover-univ-name', s.cover.univName);
+      setVal('abs-ko-body', s.abstracts?.korean?.body || '');
+      setVal('abs-ko-keywords', s.abstracts?.korean?.keywords || '');
+      setVal('abs-en-body', s.abstracts?.english?.body || '');
+      setVal('abs-en-keywords', s.abstracts?.english?.keywords || '');
+      setVal('acknowledgements-text', s.acknowledgements || '');
+
+      // Re-render all lists
+      renderAllChapterLists();
+
+      if (statusEl) { statusEl.textContent = 'Done!'; statusEl.style.color = 'var(--accent-green)'; }
+
+      // Show summary in preview
+      if (previewEl) {
+        const chCount = (parsed.chapters || []).length;
+        const refCount = (parsed.references || []).length;
+        const hasAbs = !!(parsed.abstracts?.korean?.body || parsed.abstracts?.english?.body);
+        previewEl.style.display = 'block';
+        previewEl.innerHTML = `<div style="color:var(--accent-green);font-weight:600;">Import successful!</div>
+          <div style="margin-top:4px;font-size:12px;">
+            Imported: ${chCount} chapters${parsed.cover?.title ? ' + Cover' : ''}${refCount > 0 ? ' + ' + refCount + ' references' : ''}${hasAbs ? ' + Abstracts' : ''}${parsed.acknowledgements ? ' + Acknowledgements' : ''}
+          </div>`;
+      }
+
+      toast('Document imported and formatted successfully!', 'success');
+
+      // Auto-navigate to chapters tab to review
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+      const chaptersTab = document.querySelector('[data-tab="chapters"]');
+      if (chaptersTab) { chaptersTab.classList.add('active'); chaptersTab.click(); }
+
+    } catch (e) {
+      toast(`Import failed: ${e.message}`, 'error');
+      if (statusEl) { statusEl.textContent = `Error: ${e.message}`; statusEl.style.color = 'var(--accent-red)'; }
+      if (previewEl) { previewEl.style.display = 'block'; previewEl.innerHTML = `<div style="color:var(--accent-red);">Error: ${escHtml(e.message)}</div>`; }
+    }
+    btn.disabled = false;
+    btn.textContent = 'Import & Format';
+    fileInput.value = '';
+
+    // Auto-hide status after 10s
+    setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 10000);
   });
 }
 

@@ -144,3 +144,92 @@ Rules:
     return null;
   }
 }
+
+// ── DOCX Import: parse extracted text into app state ──
+
+export async function parseDocxContent(docxText, strategy, apiKey, baseUrl, model) {
+  const chapterNumerals = ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ', 'Ⅴ', 'Ⅵ', 'Ⅶ'];
+
+  const system = `You are a document structure analyzer. Given the text extracted from a Word .docx file (master's thesis / research report), analyze its structure and return a JSON object.
+
+The JSON schema depends on the strategy:
+
+IF strategy is "full", return:
+{
+  "cover": {
+    "title": "thesis title (or empty)",
+    "subtitle": "subtitle (or empty)",
+    "date": "date like August 2026 (or empty)",
+    "major": "major/degree program (or empty)",
+    "school": "graduate school name (or empty)",
+    "studentName": "student name (or empty)",
+    "advisor": "advisor info like 'Supervised by Name' (or empty)",
+    "advisorSchool": "advisor's school (or empty)",
+    "univName": "university name (or empty)"
+  },
+  "chapters": [
+    {
+      "numeral": "Ⅰ",
+      "title": "Chapter title",
+      "sections": [
+        {
+          "heading": "1",
+          "title": "Section title",
+          "content": "section body text...",
+          "subSections": [
+            { "heading": "1.1", "title": "Sub-section title", "content": "text..." }
+          ]
+        }
+      ]
+    }
+  ],
+  "references": [
+    { "id": "keyword", "authors": "Author, A.", "year": "2024", "title": "Title", "journal": "Journal", "volume": "10", "issue": "2", "page": "1-10", "doi": "https://doi.org/xxx" }
+  ],
+  "abstracts": {
+    "korean": { "title": "", "studentName": "", "major": "", "advisor": "", "body": "Korean abstract text...", "keywords": "keyword1, keyword2" },
+    "english": { "title": "", "studentName": "", "major": "", "advisor": "", "body": "English abstract text...", "keywords": "keyword1, keyword2" }
+  },
+  "appendix": [
+    { "chapterIdx": 2, "chapterName": "III. Method Details", "requires": "3.7.7", "imports": "import torch", "code": "full code block..." }
+  ],
+  "acknowledgements": "acknowledgement text..."
+}
+
+IF strategy is "chapters", only return { "chapters": [...] }.
+
+IF strategy is "references", only return { "references": [...] }.
+
+RULES:
+- Identify chapter headings (like "Ⅰ. Introduction", "I. Introduction", "Chapter 1", "1. Introduction", etc.) and map to the chapters array with correct numeral from: ${JSON.stringify(chapterNumerals)}
+- Identify section headings (like "1. Background", "2.1 Related Work") and group under their parent chapter
+- Body text between headings goes into the appropriate content field
+- References listed at the end → extract each into structured reference objects
+- Identify Korean and English abstract sections by keywords like "국문초록", "ABSTRACT", "Abstract", "국 문 초 록"
+- The first 5 chapters found map to numerals Ⅰ-Ⅴ; any extras get numeric numerals
+- If a chapter is empty (not found), return it with empty sections array
+- Return ONLY valid JSON, no markdown code blocks
+- Use empty string "" for missing text fields, empty array [] for missing list fields`;
+
+  // Truncate input if too large (estimate ~1500 chars per chapter section is safe)
+  const maxChars = 18000;
+  const truncatedText = docxText.length > maxChars
+    ? docxText.substring(0, maxChars) + '\n\n[... text truncated, total length: ' + docxText.length + ' chars ...]'
+    : docxText;
+
+  const user = `STRATEGY: ${strategy}\n\nEXTRACTED DOCX TEXT:\n${truncatedText}`;
+
+  const result = await callDeepSeek(system, user, apiKey, baseUrl, model);
+  try {
+    const cleaned = result.replace(/```json\s*|```\s*/g, '').trim();
+    return JSON.parse(cleaned);
+  } catch {
+    try {
+      return JSON.parse(result);
+    } catch {
+      const match = result.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) return JSON.parse(match[1]);
+      return null;
+    }
+  }
+}

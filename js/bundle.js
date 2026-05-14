@@ -161,6 +161,18 @@ async function parseReference(rawText, apiKey, baseUrl, model) {
   try { return JSON.parse(result.replace(/```json\s*|```\s*/g, '').trim()); } catch(e) { return null; }
 }
 
+async function parseDocxContent(docxText, strategy, apiKey, baseUrl, model) {
+  var chapterNumerals = ['Ⅰ','Ⅱ','Ⅲ','Ⅳ','Ⅴ','Ⅵ','Ⅶ'];
+  var system = 'You are a document structure analyzer. Given the text extracted from a Word .docx file (master\'s thesis / research report), analyze its structure and return a JSON object. The JSON schema depends on the strategy. IF strategy is "full", return: {"cover":{"title":"...","subtitle":"...","date":"...","major":"...","school":"...","studentName":"...","advisor":"...","advisorSchool":"...","univName":"..."},"chapters":[{"numeral":"Ⅰ","title":"...","sections":[{"heading":"1","title":"...","content":"...","subSections":[{"heading":"1.1","title":"...","content":"..."}]}]}],"references":[{"id":"...","authors":"...","year":"...","title":"...","journal":"...","volume":"...","issue":"...","page":"...","doi":"..."}],"abstracts":{"korean":{"title":"","studentName":"","major":"","advisor":"","body":"...","keywords":"..."},"english":{"title":"","studentName":"","major":"","advisor":"","body":"...","keywords":"..."}},"appendix":[],"acknowledgements":"..."}. IF strategy is "chapters", only return {"chapters":[...]}. IF strategy is "references", only return {"references":[...]}. RULES: Identify chapter headings (like "Ⅰ. Introduction", "Chapter 1", "1. Introduction") and map to chapters with correct numerals. Identify section headings and group under parent chapters. Body text between headings goes into content fields. References listed at end → extract into structured reference objects. Identify Korean/English abstract sections by keywords "국문초록", "ABSTRACT". First 5 chapters found map to numerals Ⅰ-Ⅴ. Empty chapters should have empty sections array. Return ONLY valid JSON, no markdown code blocks. Use empty string "" for missing text, empty array [] for missing lists.';
+  var maxChars = 18000;
+  var truncatedText = docxText.length > maxChars ? docxText.substring(0, maxChars) + '\n\n[... text truncated, total length: ' + docxText.length + ' chars ...]' : docxText;
+  var user = 'STRATEGY: ' + strategy + '\n\nEXTRACTED DOCX TEXT:\n' + truncatedText;
+  var result = await callDeepSeek(system, user, apiKey, baseUrl, model);
+  try { return JSON.parse(result.replace(/```json\s*|```\s*/g, '').trim()); } catch(e) {
+    try { return JSON.parse(result); } catch(e2) { var m = result.match(/```(?:json)?\s*([\s\S]*?)```/); if (m) return JSON.parse(m[1]); return null; }
+  }
+}
+
 // ═══════════════════════════════════════════
 // MODULE: crossref.js
 // ═══════════════════════════════════════════
@@ -717,6 +729,46 @@ function initAIToolsTab() {
     try{ var result=await integrateFullReport(s,cfg.key,cfg.baseUrl,cfg.model), preview=document.getElementById('preview-content'); if(preview) preview.innerHTML='<pre style="white-space:pre-wrap;font-family:monospace;font-size:12px;">'+escHtml(result)+'</pre>'; toast('Full report integrated.'); }catch(e){toast('Error: '+e.message,'error');} btn.disabled=false; btn.textContent='Integrate & Preview'; });
 }
 
+// ── Import DOCX ──
+function initImportDocx() {
+  $('#btn-import-docx')?.addEventListener('click', async function() {
+    var cfg=getApiConfig(); if(!cfg.key){toast('Please configure API Key first.','error');return;}
+    var fileInput=$('#import-docx-file'), file=fileInput?fileInput.files?.[0]:null;
+    if(!file){toast('Please select a .docx file first.','error');return;}
+    var strategy=val('import-strategy')||'full', btn=this, statusEl=$('#import-status'), previewEl=$('#import-preview');
+    btn.disabled=true; btn.textContent='Processing...';
+    if(statusEl){statusEl.style.display='inline';statusEl.textContent='Reading .docx...';statusEl.style.color='var(--accent)';}
+    try{
+      var extractedText='';
+      if(typeof mammoth!=='undefined'){var arrayBuffer=await file.arrayBuffer(); var result=await mammoth.extractRawText({arrayBuffer:arrayBuffer}); extractedText=result.value||'';}
+      else{throw new Error('mammoth.js library not loaded. Check internet connection.');}
+      if(!extractedText.trim()){throw new Error('No text could be extracted from the document.');}
+      if(statusEl){statusEl.textContent='Extracted '+extractedText.length.toLocaleString()+' chars. Sending to AI...';}
+      if(previewEl){previewEl.style.display='block';previewEl.innerHTML='<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Extracted text preview:</div><div style="max-height:200px;overflow-y:auto;white-space:pre-wrap;">'+escHtml(extractedText.substring(0,3000))+(extractedText.length>3000?'...':'')+'</div>';}
+      var parsed=await parseDocxContent(extractedText,strategy,cfg.key,cfg.baseUrl,cfg.model);
+      if(!parsed){throw new Error('AI failed to parse document structure.');}
+      var chapterNumerals=['Ⅰ','Ⅱ','Ⅲ','Ⅳ','Ⅴ','Ⅵ','Ⅶ'], currentState=getState();
+      if(strategy==='full'||strategy==='chapters'){
+        if(parsed.cover){var c=parsed.cover; updateState('cover.title',c.title||currentState.cover.title); updateState('cover.subtitle',c.subtitle||currentState.cover.subtitle); updateState('cover.date',c.date||currentState.cover.date); updateState('cover.major',c.major||currentState.cover.major); updateState('cover.school',c.school||currentState.cover.school); updateState('cover.studentName',c.studentName||currentState.cover.studentName); updateState('cover.advisor',c.advisor||currentState.cover.advisor); updateState('cover.advisorSchool',c.advisorSchool||currentState.cover.advisorSchool); updateState('cover.univName',c.univName||currentState.cover.univName);}
+        if(parsed.chapters&&parsed.chapters.length>0){var merged=[]; for(var i=0;i<Math.max(parsed.chapters.length,5);i++){var aiCh=parsed.chapters[i]||{title:'',sections:[]}; merged.push({numeral:chapterNumerals[i]||String(i+1),title:aiCh.title||(currentState.chapters[i]?currentState.chapters[i].title:''),sections:(aiCh.sections||[]).map(function(sec,si){return{heading:String(si+1),title:sec.title||'',content:sec.content||'',subSections:(sec.subSections||[]).map(function(sub,ssi){return{heading:(si+1)+'.'+(ssi+1),title:sub.title||'',content:sub.content||''};})};})});} setState({chapters:merged}); renderChapterSelects();}
+        if(parsed.references&&parsed.references.length>0){var mRefs=parsed.references.map(function(ref,i){return{id:ref.id||'imported_'+i,authors:ref.authors||'',year:ref.year||'',title:ref.title||'',journal:ref.journal||'',volume:ref.volume||'',issue:ref.issue||'',page:ref.page||'',doi:ref.doi||'',number:null};}); setState({references:mRefs});}
+        if(parsed.abstracts){var abs=parsed.abstracts; if(abs.korean){updateState('abstracts.korean.title',abs.korean.title||'');updateState('abstracts.korean.studentName',abs.korean.studentName||'');updateState('abstracts.korean.major',abs.korean.major||'');updateState('abstracts.korean.advisor',abs.korean.advisor||'');updateState('abstracts.korean.body',abs.korean.body||'');updateState('abstracts.korean.keywords',abs.korean.keywords||'');} if(abs.english){updateState('abstracts.english.title',abs.english.title||'');updateState('abstracts.english.studentName',abs.english.studentName||'');updateState('abstracts.english.major',abs.english.major||'');updateState('abstracts.english.advisor',abs.english.advisor||'');updateState('abstracts.english.body',abs.english.body||'');updateState('abstracts.english.keywords',abs.english.keywords||'');}}
+        if(parsed.appendix&&parsed.appendix.length>0){setState({appendix:parsed.appendix});}
+        if(parsed.acknowledgements){updateState('acknowledgements',parsed.acknowledgements);}
+      }
+      if(strategy==='references'&&parsed.references&&parsed.references.length>0){var mRefs2=parsed.references.map(function(ref,i){return{id:ref.id||'imported_'+i,authors:ref.authors||'',year:ref.year||'',title:ref.title||'',journal:ref.journal||'',volume:ref.volume||'',issue:ref.issue||'',page:ref.page||'',doi:ref.doi||'',number:null};}); setState({references:mRefs2});}
+      var s=getState();setVal('cover-title',s.cover.title);setVal('cover-subtitle',s.cover.subtitle);setVal('cover-date',s.cover.date);setVal('cover-major',s.cover.major);setVal('cover-school',s.cover.school);setVal('cover-student-name',s.cover.studentName);setVal('cover-advisor',s.cover.advisor);setVal('cover-advisor-school',s.cover.advisorSchool);setVal('cover-univ-name',s.cover.univName);setVal('abs-ko-body',(s.abstracts&&s.abstracts.korean?s.abstracts.korean.body:''));setVal('abs-ko-keywords',(s.abstracts&&s.abstracts.korean?s.abstracts.korean.keywords:''));setVal('abs-en-body',(s.abstracts&&s.abstracts.english?s.abstracts.english.body:''));setVal('abs-en-keywords',(s.abstracts&&s.abstracts.english?s.abstracts.english.keywords:''));setVal('acknowledgements-text',s.acknowledgements||'');
+      renderAllChapterLists();
+      if(statusEl){statusEl.textContent='Done!';statusEl.style.color='var(--accent-green)';}
+      if(previewEl){var chCount=(parsed.chapters||[]).length, refCount=(parsed.references||[]).length, hasAbs=!!(parsed.abstracts&&(parsed.abstracts.korean&&parsed.abstracts.korean.body||parsed.abstracts.english&&parsed.abstracts.english.body)); previewEl.style.display='block';previewEl.innerHTML='<div style="color:var(--accent-green);font-weight:600;">Import successful!</div><div style="margin-top:4px;font-size:12px;">Imported: '+chCount+' chapters'+(parsed.cover&&parsed.cover.title?' + Cover':'')+(refCount>0?' + '+refCount+' references':'')+(hasAbs?' + Abstracts':'')+(parsed.acknowledgements?' + Acknowledgements':'')+'</div>';}
+      toast('Document imported and formatted successfully!','success');
+      document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active');}); document.querySelectorAll('.tab-content').forEach(function(c){c.style.display='none';}); var chaptersTab=document.querySelector('[data-tab="chapters"]'); if(chaptersTab){chaptersTab.classList.add('active');chaptersTab.click();}
+    }catch(e){toast('Import failed: '+e.message,'error'); if(statusEl){statusEl.textContent='Error: '+e.message;statusEl.style.color='var(--accent-red)';} if(previewEl){previewEl.style.display='block';previewEl.innerHTML='<div style="color:var(--accent-red);">Error: '+escHtml(e.message)+'</div>';}}
+    btn.disabled=false; btn.textContent='Import & Format'; fileInput.value='';
+    setTimeout(function(){if(statusEl)statusEl.style.display='none';},10000);
+  });
+}
+
 // ── Export ──
 function initExportTab() {
   $('#btn-export-docx2')?.addEventListener('click', function() { doExportDocx(); });
@@ -771,7 +823,7 @@ function boot() {
   loadApiConfig(); restoreApiUI(); renderChapterSelects();
   initTabs(); initCoverTab(); initChaptersTab(); initTablesTab();
   initFiguresTab(); initEquationsTab(); initReferencesTab();
-  initAbstractsTab(); initAppendixTab(); initAIToolsTab();
+  initAbstractsTab(); initAppendixTab(); initAIToolsTab(); initImportDocx();
   initExportTab(); initTopBar(); initPreview(); renderAllChapterLists();
   ['api-key','api-base','api-model'].forEach(function(id){ $(id)?.addEventListener('change', function(){ saveApiConfigFromUI(); }); });
 }

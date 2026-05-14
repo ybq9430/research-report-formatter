@@ -238,6 +238,25 @@
             <div id="ai-check-output" style="margin-top:8px;display:none;"></div>
           </div>
 
+          <!-- Import .docx -->
+          <div class="card" style="background:var(--bg-tertiary);margin-bottom:8px;">
+            <div class="card-header" style="font-size:13px;">Import & Format .docx</div>
+            <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload an existing Word document. AI will analyze its structure and populate all sections (cover, chapters, references, abstracts, acknowledgements).</p>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <input type="file" id="import-docx-file" accept=".docx" style="flex:1;font-size:12px;">
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <select id="import-strategy" style="font-size:12px;width:180px;">
+                <option value="full">Full Parse (all sections)</option>
+                <option value="chapters">Chapters Only</option>
+                <option value="references">References Only</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="btn-import-docx">Import & Format</button>
+              <span id="import-status" style="font-size:11px;color:var(--text-muted);display:none;"></span>
+            </div>
+            <div id="import-preview" style="margin-top:8px;padding:8px;background:var(--bg-input);border-radius:4px;display:none;max-height:300px;overflow-y:auto;font-size:12px;"></div>
+          </div>
+
           <!-- Integrate All -->
           <div class="card" style="background:var(--bg-tertiary);">
             <div class="card-header" style="font-size:13px;">One-Click Full Integration</div>
@@ -287,6 +306,7 @@
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 
 <!-- App Script (bundled, non-module for file:// compatibility) -->
 <script src="js/bundle.js"></script>
