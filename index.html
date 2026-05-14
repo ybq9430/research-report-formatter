@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research Report Auto-Formatter</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="css/style.css">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg: { primary: '#1a1d23', secondary: '#21252b', tertiary: '#282c34', input: '#2c313a' },
+          border: '#3a3f4b',
+          text: { primary: '#e1e4e8', secondary: '#959da5', muted: '#6a737d' },
+          accent: { DEFAULT: '#58a6ff', green: '#3fb950', red: '#f85149', yellow: '#d2991d', purple: '#a371f7' },
+        }
+      }
+    }
+  }
+</script>
+</head>
+<body>
+
+<div id="app-container">
+
+  <!-- Top Bar -->
+  <div id="top-bar">
+    <span style="font-weight:700;color:var(--accent);font-size:15px;">RRAF</span>
+    <div class="top-bar-divider"></div>
+    <input type="password" id="api-key" placeholder="DeepSeek API Key" style="width:200px;font-size:12px;" autocomplete="off">
+    <input type="text" id="api-base" value="https://api.deepseek.com" style="width:200px;font-size:12px;">
+    <select id="api-model" style="font-size:12px;">
+      <option value="deepseek-chat">deepseek-chat</option>
+      <option value="deepseek-reasoner">deepseek-reasoner</option>
+    </select>
+    <button class="btn btn-secondary btn-sm" id="btn-test-api">Test</button>
+    <span id="api-status" class="status-dot idle"></span>
+    <div class="top-bar-divider"></div>
+    <button class="btn btn-success btn-sm" id="btn-export-docx">Export .docx</button>
+    <button class="btn btn-secondary btn-sm" id="btn-export-md">Export .md</button>
+    <button class="btn btn-secondary btn-sm" id="btn-toggle-preview">Toggle Preview</button>
+    <span style="margin-left:auto;font-size:11px;color:var(--text-muted);">v1.0.0</span>
+  </div>
+
+  <!-- Main Content -->
+  <div id="main-content">
+
+    <!-- Editor Panel (Left) -->
+    <div id="editor-panel">
+
+      <!-- Tab Navigation -->
+      <div class="tab-nav" id="tab-nav">
+        <button class="tab-btn active" data-tab="cover">Cover</button>
+        <button class="tab-btn" data-tab="chapters">Chapters</button>
+        <button class="tab-btn" data-tab="tables">Tables</button>
+        <button class="tab-btn" data-tab="figures">Figures</button>
+        <button class="tab-btn" data-tab="equations">Equations</button>
+        <button class="tab-btn" data-tab="references">References</button>
+        <button class="tab-btn" data-tab="abstracts">Abstracts</button>
+        <button class="tab-btn" data-tab="appendix">Appendix</button>
+        <button class="tab-btn" data-tab="ai-tools">AI Tools</button>
+        <button class="tab-btn" data-tab="export">Export</button>
+      </div>
+
+      <!-- Tab: Cover Page (M2) -->
+      <div id="tab-cover" class="tab-content">
+        <div class="card">
+          <div class="card-header">Cover Page Information</div>
+          <div class="form-group"><label>Paper Title (28pt)</label><input type="text" id="cover-title" placeholder="Enter your thesis title"></div>
+          <div class="form-group"><label>Subtitle (14pt, gray)</label><input type="text" id="cover-subtitle" placeholder="Optional subtitle"></div>
+          <div class="form-group"><label>Date</label><input type="text" id="cover-date" value="August 2026"></div>
+          <div class="form-group"><label>Major</label><input type="text" id="cover-major" value="Major of Computer Science and Technology"></div>
+          <div class="form-group"><label>Graduate School</label><input type="text" id="cover-school" value="Graduate School of Youngsan University"></div>
+          <div class="form-group"><label>Student Name</label><input type="text" id="cover-student-name" placeholder="Your name"></div>
+          <div class="form-group"><label>Advisor</label><input type="text" id="cover-advisor" value="Supervised by Jinwhan Kim"></div>
+          <div class="form-group"><label>Advisor's School</label><input type="text" id="cover-advisor-school" placeholder="Advisor's institution"></div>
+          <div class="form-group"><label>University Name</label><input type="text" id="cover-univ-name" placeholder="University name"></div>
+        </div>
+      </div>
+
+      <!-- Tab: Chapters (M4) -->
+      <div id="tab-chapters" class="tab-content" style="display:none;">
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <button class="btn btn-primary btn-sm" id="btn-add-chapter">+ Add Chapter</button>
+          <button class="btn btn-secondary btn-sm" id="btn-collapse-all">Collapse All</button>
+          <button class="btn btn-secondary btn-sm" id="btn-expand-all">Expand All</button>
+        </div>
+        <div id="chapters-container"></div>
+      </div>
+
+      <!-- Tab: Tables (M5) -->
+      <div id="tab-tables" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">Tables</div>
+          <div class="form-group"><label>Belongs to Chapter</label><select id="table-chapter-select"></select></div>
+          <button class="btn btn-primary btn-sm" id="btn-add-table">+ Add Table</button>
+          <div id="tables-list" style="margin-top:12px;"></div>
+        </div>
+      </div>
+
+      <!-- Tab: Figures (M6) -->
+      <div id="tab-figures" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">Figures</div>
+          <div class="form-group"><label>Belongs to Chapter</label><select id="figure-chapter-select"></select></div>
+          <div class="form-group"><label>Caption / Description</label><input type="text" id="figure-caption" placeholder="Figure description"></div>
+          <div class="form-group"><label>Image (PNG/JPG/SVG)</label><input type="file" id="figure-file" accept="image/*"></div>
+          <button class="btn btn-primary btn-sm" id="btn-add-figure">+ Add Figure</button>
+          <div id="figures-list" style="margin-top:12px;"></div>
+        </div>
+      </div>
+
+      <!-- Tab: Equations (M7) -->
+      <div id="tab-equations" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">Equations (LaTeX)</div>
+          <div class="form-group"><label>Belongs to Chapter</label><select id="equation-chapter-select"></select></div>
+          <div class="form-group"><label>LaTeX Expression</label><textarea id="equation-latex" rows="3" placeholder="e.g. Z = f_{\theta}(X)"></textarea></div>
+          <button class="btn btn-primary btn-sm" id="btn-add-equation">+ Add Equation</button>
+          <div id="equations-list" style="margin-top:12px;"></div>
+          <div id="equation-preview" style="margin-top:8px;padding:8px;background:var(--bg-tertiary);border-radius:4px;text-align:center;"></div>
+        </div>
+      </div>
+
+      <!-- Tab: References (M8) -->
+      <div id="tab-references" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">Reference Management</div>
+
+          <!-- Manual input -->
+          <div class="card" style="background:var(--bg-tertiary);margin-bottom:12px;">
+            <div class="card-header" style="font-size:13px;">Manual Input</div>
+            <div class="form-group"><label>Reference ID (keyword for [ref:xxx])</label><input type="text" id="ref-id" placeholder="e.g. Li2024MedicalData"></div>
+            <div class="form-group"><label>Raw Reference Text</label><textarea id="ref-raw" rows="3" placeholder="Paste any format reference text..."></textarea></div>
+            <button class="btn btn-primary btn-sm" id="btn-parse-ref">AI Parse</button>
+          </div>
+
+          <!-- DOI Fetch -->
+          <div class="card" style="background:var(--bg-tertiary);margin-bottom:12px;">
+            <div class="card-header" style="font-size:13px;">DOI Fetch (CrossRef)</div>
+            <div class="form-group"><label>DOI(s) — one per line</label><textarea id="ref-doi" rows="2" placeholder="10.1186/s12910-024-01135-8&#10;10.1038/s41586-020-2649-2"></textarea></div>
+            <button class="btn btn-primary btn-sm" id="btn-fetch-doi">Fetch from CrossRef</button>
+          </div>
+
+          <!-- BibTeX Import -->
+          <div class="card" style="background:var(--bg-tertiary);margin-bottom:12px;">
+            <div class="card-header" style="font-size:13px;">BibTeX Import</div>
+            <div class="form-group"><label>Reference ID</label><input type="text" id="bibtex-id" placeholder="Reference keyword"></div>
+            <div class="form-group"><label>BibTeX Entry</label><textarea id="bibtex-entry" rows="6" placeholder="@article{...}"></textarea></div>
+            <button class="btn btn-primary btn-sm" id="btn-import-bibtex">Import BibTeX</button>
+          </div>
+
+          <!-- Reference list -->
+          <div class="card-header">Reference List (<span id="ref-count">0</span> entries)</div>
+          <div id="ref-list"></div>
+
+          <!-- Citation matching -->
+          <div class="card" style="background:var(--bg-tertiary);margin-top:12px;">
+            <div class="card-header" style="font-size:13px;">Citation Matching</div>
+            <p style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">Use <code>[ref:keyword]</code> in body text, then click match.</p>
+            <button class="btn btn-accent btn-sm" id="btn-match-refs" style="background:var(--accent-purple);color:#fff;">Match [ref:xxx] → [n]</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Abstracts (M9) -->
+      <div id="tab-abstracts" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">국문초록 (Korean Abstract)</div> <!-- 국문초록 -->
+          <div class="form-group"><label>논문 제목 (Thesis Title)</label><input type="text" id="abs-ko-title"></div>
+          <div class="form-group"><label>학생이름 (Student Name)</label><input type="text" id="abs-ko-name"></div>
+          <div class="form-group"><label>전공 (Major)</label><input type="text" id="abs-ko-major"></div>
+          <div class="form-group"><label>지도교수 (Advisor)</label><input type="text" id="abs-ko-advisor"></div>
+          <div class="form-group"><label>본문 (Body)</label><textarea id="abs-ko-body" rows="6" style="font-family:'맑은 고딕',sans-serif;"></textarea></div>
+          <div class="form-group"><label>키워드 (Keywords)</label><input type="text" id="abs-ko-keywords" placeholder="키워드1, 키워드2, ..."></div>
+        </div>
+        <div class="card">
+          <div class="card-header">ABSTRACT (English)</div>
+          <div class="form-group"><label>Title</label><input type="text" id="abs-en-title"></div>
+          <div class="form-group"><label>Student Name</label><input type="text" id="abs-en-name"></div>
+          <div class="form-group"><label>Major</label><input type="text" id="abs-en-major"></div>
+          <div class="form-group"><label>Advisor</label><input type="text" id="abs-en-advisor"></div>
+          <div class="form-group"><label>Body</label><textarea id="abs-en-body" rows="6"></textarea></div>
+          <div class="form-group"><label>Keywords</label><input type="text" id="abs-en-keywords" placeholder="keyword1, keyword2, ..."></div>
+        </div>
+      </div>
+
+      <!-- Tab: Appendix (M10) -->
+      <div id="tab-appendix" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">APPENDIX</div>
+          <div class="form-group"><label>Belongs to Chapter</label><select id="appendix-chapter-select"></select></div>
+          <div class="form-group"><label>Chapter Name</label><input type="text" id="appendix-chapter-name" placeholder="e.g. III. Proposed Framework"></div>
+          <div class="form-group"><label>Required Packages (e.g. python==3.7.7)</label><input type="text" id="appendix-requires"></div>
+          <div class="form-group"><label>Import Statements</label><textarea id="appendix-imports" rows="3" placeholder="import torch&#10;import numpy as np" style="font-family:'Courier New',monospace;"></textarea></div>
+          <div class="form-group"><label>Code</label><textarea id="appendix-code" rows="8" placeholder="Paste your code here..." style="font-family:'Courier New',monospace;font-size:10pt;"></textarea></div>
+          <button class="btn btn-primary btn-sm" id="btn-add-appendix">+ Add Appendix Entry</button>
+          <div id="appendix-list" style="margin-top:12px;"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">ACKNOWLEDGEMENTS</div>
+          <textarea id="acknowledgements-text" rows="6" placeholder="Write your acknowledgements..."></textarea>
+        </div>
+      </div>
+
+      <!-- Tab: AI Tools (M11) -->
+      <div id="tab-ai-tools" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">AI Writing Assistant</div>
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">Configure your API Key in the top bar first.</p>
+
+          <!-- Polish -->
+          <div class="card" style="background:var(--bg-tertiary);margin-bottom:8px;">
+            <div class="card-header" style="font-size:13px;">Polish Text</div>
+            <textarea id="ai-polish-input" rows="3" placeholder="Paste a paragraph to polish..."></textarea>
+            <button class="btn btn-primary btn-sm" id="btn-ai-polish" style="margin-top:8px;">Polish</button>
+            <div id="ai-polish-output" style="margin-top:8px;padding:8px;background:var(--bg-input);border-radius:4px;display:none;"></div>
+          </div>
+
+          <!-- Expand -->
+          <div class="card" style="background:var(--bg-tertiary);margin-bottom:8px;">
+            <div class="card-header" style="font-size:13px;">Expand Section from Keywords</div>
+            <textarea id="ai-expand-input" rows="2" placeholder="Keywords / outline for the section..."></textarea>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+              <input type="number" id="ai-expand-words" value="300" min="50" max="2000" style="width:80px;">
+              <span style="font-size:12px;color:var(--text-secondary);">target words</span>
+              <button class="btn btn-primary btn-sm" id="btn-ai-expand">Expand</button>
+            </div>
+            <div id="ai-expand-output" style="margin-top:8px;padding:8px;background:var(--bg-input);border-radius:4px;display:none;"></div>
+          </div>
+
+          <!-- Format Check -->
+          <div class="card" style="background:var(--bg-tertiary);margin-bottom:8px;">
+            <div class="card-header" style="font-size:13px;">Full Document Format Check</div>
+            <button class="btn btn-primary btn-sm" id="btn-ai-check">Run Format Check</button>
+            <div id="ai-check-output" style="margin-top:8px;display:none;"></div>
+          </div>
+
+          <!-- Integrate All -->
+          <div class="card" style="background:var(--bg-tertiary);">
+            <div class="card-header" style="font-size:13px;">One-Click Full Integration</div>
+            <button class="btn btn-accent btn-sm" id="btn-ai-integrate" style="background:var(--accent-purple);color:#fff;">Integrate & Preview</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Export (M12) -->
+      <div id="tab-export" class="tab-content" style="display:none;">
+        <div class="card">
+          <div class="card-header">Export Options</div>
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">Export your formatted research report.</p>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <button class="btn btn-success" id="btn-export-docx2">Export .docx (Word)</button>
+            <button class="btn btn-secondary" id="btn-export-md2">Export Markdown</button>
+            <button class="btn btn-secondary" id="btn-print-preview">Print Preview</button>
+          </div>
+          <div id="export-status" style="margin-top:12px;font-size:12px;color:var(--text-secondary);"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">Validation Checklist</div>
+          <div id="validation-checklist" style="font-size:12px;"></div>
+          <button class="btn btn-secondary btn-sm" id="btn-validate" style="margin-top:8px;">Run Validation</button>
+        </div>
+      </div>
+
+    </div><!-- /editor-panel -->
+
+    <!-- Preview Panel (Right) -->
+    <div id="preview-panel">
+      <div id="preview-content">
+        <div class="empty-state">
+          <div class="icon">📄</div>
+          <p>Preview will appear here<br>as you fill in the content.</p>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main-content -->
+</div><!-- /app-container -->
+
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- CDN Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+<!-- App Script (bundled, non-module for file:// compatibility) -->
+<script src="js/bundle.js"></script>
+
+</body>
+</html>
